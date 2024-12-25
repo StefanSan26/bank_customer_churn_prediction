@@ -1,0 +1,1 @@
+{"run_number": "1735135599725630", "step_name": "start", "task_id": "1", "flow_id": "HelloFlow", "user_name": "stefansanchez", "tags": [], "system_tags": ["user:stefansanchez", "project_branch:user.stefansanchez", "project:bank_customer_churn_prediction", "metaflow_version:2.13", "python_version:3.11.5", "runtime:dev"], "ts_epoch": 1735135599734}
