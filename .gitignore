@@ -1,10 +1,20 @@
-# Python-generated files
 __pycache__/
-*.py[oc]
-build/
-dist/
-wheels/
-*.egg-info
+*.py[cod]
+*$py.class
 
-# Virtual environments
+.metaflow/
+metaflow_card_cache/
+metaflow.s3.**/
+mlruns/
+mlartifacts/
+
+.DS_Store
+.ipynb_checkpoints
+.env
 .venv
+.venv*
+*.pem
+.idx/aws.nix
+
+penguins.db
+sample.json
