@@ -338,22 +338,35 @@ class Training(FlowSpec):
         # Let's calculate the mean and standard deviation of the accuracy and loss from
         # all the cross-validation folds. Notice how we are accumulating these values
         # using the `inputs` parameter provided by Metaflow.
-        metrics = [[i.accuracy, i.loss] for i in inputs]
-        self.accuracy, self.loss = np.mean(metrics, axis=0)
-        self.accuracy_std, self.loss_std = np.std(metrics, axis=0)
-
-        logging.info("Accuracy: %f ±%f", self.accuracy, self.accuracy_std)
-        logging.info("Loss: %f ±%f", self.loss, self.loss_std)
+        metrics = {
+            'accuracies': [i.accuracy for i in inputs],
+            'precisions': [i.precision for i in inputs],
+            'recalls': [i.recall for i in inputs]
+        }
+        
+        self.mean_accuracy = np.mean(metrics['accuracies'])
+        self.mean_precision = np.mean(metrics['precisions'])
+        self.mean_recall = np.mean(metrics['recalls'])
+        
+        self.accuracy_std = np.std(metrics['accuracies'])
+        self.precision_std = np.std(metrics['precisions'])
+        self.recall_std = np.std(metrics['recalls'])
+        
+        logging.info("Accuracy: %f ±%f", self.mean_accuracy, self.accuracy_std)
+        logging.info("Precision: %f ±%f", self.mean_precision, self.precision_std)
+        logging.info("Recall: %f ±%f", self.mean_recall, self.recall_std)
 
         # Let's log the model metrics on the parent run.
         mlflow.set_tracking_uri(self.mlflow_tracking_uri)
         with mlflow.start_run(run_id=self.mlflow_run_id):
             mlflow.log_metrics(
                 {
-                    "cross_validation_accuracy": self.accuracy,
+                    "cross_validation_accuracy": self.mean_accuracy,
                     "cross_validation_accuracy_std": self.accuracy_std,
-                    "cross_validation_loss": self.loss,
-                    "cross_validation_loss_std": self.loss_std,
+                    "cross_validation_precision": self.mean_precision,
+                    "cross_validation_precision_std": self.precision_std,
+                    "cross_validation_recall": self.mean_recall,
+                    "cross_validation_recall_std": self.recall_std,
                 },
             )
 
@@ -363,7 +376,7 @@ class Training(FlowSpec):
         self.next(self.register_model)
 
     @step
-    def register_model(self, inputs):
+    def register_model(self):
         """Register the model in the Model Registry.
         
         This function will aggregate results from all folds and register the best model.
@@ -371,41 +384,25 @@ class Training(FlowSpec):
         import numpy as np
         import mlflow
         
-        self.merge_artifacts(inputs)
-        
-
-        # Calculate average metrics across all folds
-        accuracies = [input.accuracy for input in inputs]
-        precisions = [input.precision for input in inputs]
-        recalls = [input.recall for input in inputs]
-        
-        self.mean_accuracy = np.mean(accuracies)
-        self.mean_precision = np.mean(precisions)
-        self.mean_recall = np.mean(recalls)
-        
-        # Find the best performing fold based on accuracy
-        best_fold_idx = np.argmax(accuracies)
-        best_fold = inputs[best_fold_idx]
-        
-        # Keep only the best model and its metrics
-        self.accuracy = best_fold.accuracy
-        self.precision = best_fold.precision
-        self.recall = best_fold.recall
-        self.model = best_fold.model
-        self.y_pred = best_fold.y_pred
-        self.mlflow_fold_run_id = best_fold.mlflow_fold_run_id
-        
+        # All metrics were already calculated in evaluate_model step
         logging.info(
-            "Cross-validation results - Mean accuracy: %.3f (±%.3f)",
-            self.mean_accuracy,
-            np.std(accuracies)
+            "Model evaluation complete. Final metrics:"
         )
         logging.info(
+            "Mean accuracy: %.3f (±%.3f)",
+            self.mean_accuracy,
+            self.accuracy_std
+        )
+
+        # Find best performing fold based on accuracy
+        # self.best_fold = max(inputs, key=lambda x: x.accuracy)
+
+        logging.info(
             "Best fold (fold %d) - accuracy: %.3f - precision: %.3f - recall: %.3f",
-            best_fold.fold,
-            self.accuracy,
-            self.precision,
-            self.recall
+            self.best_fold.fold,
+            self.best_fold.accuracy,
+            self.best_fold.precision,
+            self.best_fold.recall
         )
 
         mlflow.set_tracking_uri(self.mlflow_tracking_uri)
@@ -415,9 +412,9 @@ class Training(FlowSpec):
                 "mean_accuracy": self.mean_accuracy,
                 "mean_precision": self.mean_precision,
                 "mean_recall": self.mean_recall,
-                "best_fold_accuracy": self.accuracy,
-                "best_fold_precision": self.precision,
-                "best_fold_recall": self.recall
+                "best_fold_accuracy": self.best_fold.accuracy,
+                "best_fold_precision": self.best_fold.precision,
+                "best_fold_recall": self.best_fold.recall
             })
         
         # After logging metrics, proceed to the end step
