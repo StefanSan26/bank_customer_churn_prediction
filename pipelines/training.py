@@ -19,26 +19,27 @@ from metaflow import (
     pypi_base,
     resources,
     step,
+    conda_base,
 )
 
 # PYTHON = "3.12"
-# PACKAGES = {
-#     "scikit-learn": "1.5.2",
-#     "pandas": "2.2.3",
-#     "numpy": "2.1.1",
-#     "keras": "3.5.0",
-#     "jax[cpu]": "0.4.33",
-#     "boto3": "1.35.32",
-#     "packaging": "24.1",
-#     "mlflow": "2.17.1",
-#     "setuptools": "75.1.0",
-#     "requests": "2.32.3",
-#     "evidently": "0.4.33",
-#     "azure-ai-ml": "1.19.0",
-#     "azureml-mlflow": "1.57.0.post1",
-#     "python-dotenv": "1.0.1",
-# }
-
+PACKAGES = {
+    "azure-ai-ml": "1.19.0",
+    "azureml-mlflow": "1.57.0.post1",
+    "boto3": "1.35.32",
+    "catboost": "1.2.7",
+    "evidently": "0.4.33",
+    "jax[cpu]": "0.4.24",
+    "keras": "2.15.0",
+    "mlflow": "2.17.1",
+    "numpy": "1.26.4",
+    "packaging": "24.1",
+    "pandas": "2.2.3",
+    "python-dotenv": "1.0.1",
+    "requests": "2.32.3",
+    "scikit-learn": "1.5.2",
+    "setuptools": "75.1.0"
+}
 # def packages(*names: str):
 #     """Return a dictionary of the specified packages and their version.
 
@@ -49,11 +50,11 @@ from metaflow import (
 
 
 @project(name='bank_customer_churn_prediction')
-# @pypi_base(
+# @pypi_base(python='3.x', libraries={'pandas': '2.1.4'})
+@pypi_base(
 #     python=PYTHON,
-#     packages=PACKAGES
-# )
-
+packages=PACKAGES
+)
 
 
 class Training(FlowSpec):
@@ -69,7 +70,7 @@ class Training(FlowSpec):
         vars={
             "MLFLOW_TRACKING_URI": os.getenv(
                 "MLFLOW_TRACKING_URI",
-                "http://127.0.0.1:5000",
+                "http://127.0.0.1:8080",
             ),
         },
     )
@@ -170,21 +171,29 @@ class Training(FlowSpec):
         import hashlib
 
         # Let's start by unpacking the indices representing the training and test data
-        # for the current fold. We computed these values in the previous step and passed
-        # them as the input to this step.
+        # for the current fold. 
         self.fold, (self.train_indices, self.test_indices) = self.input
-
         logging.info("Transforming fold %d...", self.fold)
 
 
         # Finally, let's build the SciKit-Learn pipeline to process the feature columns,
         # fit it to the training data and transform both the training and test data.
-        self.x_train = self.data.iloc[self.train_indices]
-        self.x_test = self.data.iloc[self.test_indices]
+        self.x_train = self.data.iloc[self.train_indices].drop(columns=['Exited'])
+        self.x_test = self.data.iloc[self.test_indices].drop(columns=['Exited'])
         self.y_train = self.data.iloc[self.train_indices].Exited
         self.y_test = self.data.iloc[self.test_indices].Exited
 
-        label_enc = LabelEncoder()
+        # Fit the label encoder on the training data only
+        label_enc_gender = LabelEncoder()
+        label_enc_geography = LabelEncoder()
+
+
+        # Handle categorical variables
+        # Use label encoding for gender and geography which have limited categories
+        self.x_train["Gender"] = label_enc_gender.fit_transform(self.x_train["Gender"])
+        self.x_test["Gender"] = label_enc_gender.transform(self.x_test["Gender"])
+        self.x_train["Geography"] = label_enc_geography.fit_transform(self.x_train["Geography"])
+        self.x_test["Geography"] = label_enc_geography.transform(self.x_test["Geography"])
 
         # Define a function to hash surnames to a consistent integer value
         def hash_surname(surname):
@@ -193,13 +202,6 @@ class Training(FlowSpec):
             # Convert first 4 bytes of hash to integer and take modulo 1000 
             # to limit to 0-999 range
             return int(hash_obj.hexdigest()[:8], 16) % 1000
-
-        # Handle categorical variables
-        # Use label encoding for gender and geography which have limited categories
-        self.x_train["Gender"] = label_enc.fit_transform(self.x_train[["Gender"]])
-        self.x_test["Gender"] = label_enc.transform(self.x_test[["Gender"]])
-        self.x_train["Geography"] = label_enc.fit_transform(self.x_train[["Geography"]])
-        self.x_test["Geography"] = label_enc.transform(self.x_test[["Geography"]])
 
         # Use hash encoding for surnames to handle unseen values consistently
         self.x_train["Surname"] = self.x_train["Surname"].apply(hash_surname)
@@ -373,52 +375,52 @@ class Training(FlowSpec):
         # After we finish evaluating the cross-validation process, we can send the flow
         # to the registration step to register where we'll register the final version of
         # the model.
-        self.next(self.register_model)
-
-    @step
-    def register_model(self):
-        """Register the model in the Model Registry.
-        
-        This function will aggregate results from all folds and register the best model.
-        """
-        import numpy as np
-        import mlflow
-        
-        # All metrics were already calculated in evaluate_model step
-        logging.info(
-            "Model evaluation complete. Final metrics:"
-        )
-        logging.info(
-            "Mean accuracy: %.3f (±%.3f)",
-            self.mean_accuracy,
-            self.accuracy_std
-        )
-
-        # Find best performing fold based on accuracy
-        # self.best_fold = max(inputs, key=lambda x: x.accuracy)
-
-        logging.info(
-            "Best fold (fold %d) - accuracy: %.3f - precision: %.3f - recall: %.3f",
-            self.best_fold.fold,
-            self.best_fold.accuracy,
-            self.best_fold.precision,
-            self.best_fold.recall
-        )
-
-        mlflow.set_tracking_uri(self.mlflow_tracking_uri)
-
-        with mlflow.start_run(run_id=self.mlflow_run_id):
-            mlflow.log_metrics({
-                "mean_accuracy": self.mean_accuracy,
-                "mean_precision": self.mean_precision,
-                "mean_recall": self.mean_recall,
-                "best_fold_accuracy": self.best_fold.accuracy,
-                "best_fold_precision": self.best_fold.precision,
-                "best_fold_recall": self.best_fold.recall
-            })
-        
-        # After logging metrics, proceed to the end step
         self.next(self.end)
+
+    # @step
+    # def register_model(self):
+    #     """Register the model in the Model Registry.
+        
+    #     This function will aggregate results from all folds and register the best model.
+    #     """
+    #     import numpy as np
+    #     import mlflow
+        
+    #     # All metrics were already calculated in evaluate_model step
+    #     logging.info(
+    #         "Model evaluation complete. Final metrics:"
+    #     )
+    #     logging.info(
+    #         "Mean accuracy: %.3f (±%.3f)",
+    #         self.mean_accuracy,
+    #         self.accuracy_std
+    #     )
+
+    #     # Find best performing fold based on accuracy
+    #     # self.best_fold = max(inputs, key=lambda x: x.accuracy)
+
+    #     logging.info(
+    #         "Best fold (fold %d) - accuracy: %.3f - precision: %.3f - recall: %.3f",
+    #         self.best_fold.fold,
+    #         self.best_fold.accuracy,
+    #         self.best_fold.precision,
+    #         self.best_fold.recall
+    #     )
+
+    #     mlflow.set_tracking_uri(self.mlflow_tracking_uri)
+
+    #     with mlflow.start_run(run_id=self.mlflow_run_id):
+    #         mlflow.log_metrics({
+    #             "mean_accuracy": self.mean_accuracy,
+    #             "mean_precision": self.mean_precision,
+    #             "mean_recall": self.mean_recall,
+    #             "best_fold_accuracy": self.best_fold.accuracy,
+    #             "best_fold_precision": self.best_fold.precision,
+    #             "best_fold_recall": self.best_fold.recall
+    #         })
+        
+    #     # After logging metrics, proceed to the end step
+    #     self.next(self.end)
 
     @step
     def end(self):
