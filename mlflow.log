@@ -1,0 +1,33 @@
+[2025-03-19 17:36:15 -0500] [91829] [INFO] Starting gunicorn 23.0.0
+[2025-03-19 17:36:15 -0500] [91829] [INFO] Listening at: http://127.0.0.1:5001 (91829)
+[2025-03-19 17:36:15 -0500] [91829] [INFO] Using worker: sync
+[2025-03-19 17:36:15 -0500] [91830] [INFO] Booting worker with pid: 91830
+[2025-03-19 17:36:16 -0500] [91831] [INFO] Booting worker with pid: 91831
+[2025-03-19 17:36:16 -0500] [91832] [INFO] Booting worker with pid: 91832
+[2025-03-19 17:36:16 -0500] [91833] [INFO] Booting worker with pid: 91833
+[2025-03-19 19:37:31 -0500] [91829] [ERROR] Worker (pid:91832) was sent SIGHUP!
+[2025-03-19 19:37:31 -0500] [91829] [ERROR] Worker (pid:91830) was sent SIGHUP!
+[2025-03-19 19:37:31 -0500] [91829] [ERROR] Worker (pid:91831) was sent SIGHUP!
+[2025-03-19 19:37:31 -0500] [91829] [ERROR] Worker (pid:91833) was sent SIGHUP!
+[2025-03-19 19:37:31 -0500] [99465] [INFO] Booting worker with pid: 99465
+[2025-03-19 19:37:31 -0500] [99466] [INFO] Booting worker with pid: 99466
+[2025-03-19 19:37:31 -0500] [99467] [INFO] Booting worker with pid: 99467
+[2025-03-19 19:37:31 -0500] [99468] [INFO] Booting worker with pid: 99468
+[2025-03-19 19:37:31 -0500] [91829] [INFO] Handling signal: hup
+[2025-03-19 19:37:31 -0500] [91829] [INFO] Hang up: Master
+[2025-03-19 19:37:31 -0500] [99469] [INFO] Booting worker with pid: 99469
+[2025-03-19 19:37:31 -0500] [99470] [INFO] Booting worker with pid: 99470
+[2025-03-19 19:37:31 -0500] [99471] [INFO] Booting worker with pid: 99471
+[2025-03-19 19:37:31 -0500] [99472] [INFO] Booting worker with pid: 99472
+[2025-03-19 19:37:35 -0500] [99468] [INFO] Worker exiting (pid: 99468)
+[2025-03-19 19:37:35 -0500] [99467] [INFO] Worker exiting (pid: 99467)
+[2025-03-19 19:37:35 -0500] [99466] [INFO] Worker exiting (pid: 99466)
+[2025-03-19 19:37:35 -0500] [99465] [INFO] Worker exiting (pid: 99465)
+[2025-03-19 19:37:36 -0500] [91829] [ERROR] Worker (pid:99467) was sent SIGTERM!
+[2025-03-19 19:37:36 -0500] [91829] [ERROR] Worker (pid:99468) was sent SIGTERM!
+[2025-03-19 19:37:54 -0500] [91829] [INFO] Handling signal: term
+[2025-03-19 19:37:54 -0500] [99469] [INFO] Worker exiting (pid: 99469)
+[2025-03-19 19:37:54 -0500] [99470] [INFO] Worker exiting (pid: 99470)
+[2025-03-19 19:37:54 -0500] [99471] [INFO] Worker exiting (pid: 99471)
+[2025-03-19 19:37:54 -0500] [99472] [INFO] Worker exiting (pid: 99472)
+[2025-03-19 19:37:54 -0500] [91829] [INFO] Shutting down: Master

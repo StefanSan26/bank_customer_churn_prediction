@@ -16,10 +16,7 @@ from metaflow import (
     current,
     environment,
     project,
-    pypi_base,
-    resources,
     step,
-    conda_base,
 )
 
 # PYTHON = "3.12"
@@ -50,13 +47,6 @@ PACKAGES = {
 
 
 @project(name='bank_customer_churn_prediction')
-# @pypi_base(python='3.x', libraries={'pandas': '2.1.4'})
-@pypi_base(
-#     python=PYTHON,
-packages=PACKAGES
-)
-
-
 class Training(FlowSpec):
     """Training pipeline.
 
@@ -79,24 +69,20 @@ class Training(FlowSpec):
         """Start and prepare the Training pipeline."""
         import mlflow
 
-        self.mlflow_tracking_uri = os.getenv("MLFLOW_TRACKING_URI", "http://127.0.0.1:5000")
+        self.mlflow_tracking_uri = os.getenv("MLFLOW_TRACKING_URI", "http://127.0.0.1:5001")
 
         logging.info("MLFLOW_TRACKING_URI: %s", self.mlflow_tracking_uri)
         mlflow.set_tracking_uri(self.mlflow_tracking_uri)
         logging.info("Starting pipeline")
 
-        # self.next(self.load_dataset)
-        # self.training_parameters = {
-        #     "epochs": TRAINING_EPOCHS,
-        #     "batch_size": TRAINING_BATCH_SIZE,
-        # }
+        # Set the experiment
+        mlflow.set_experiment("bank_churn_prediction")
+        
         try:
-            # Let's start a new MLFlow run to track everything that happens during the
-            # execution of this flow. We want to set the name of the MLFlow
-            # experiment to the Metaflow run identifier so we can easily
-            # recognize which experiment corresponds with each run.
+            # Start a new MLFlow run
             run = mlflow.start_run(run_name=current.run_id)
             self.mlflow_run_id = run.info.run_id
+            logging.info(f"Started MLflow run with ID: {self.mlflow_run_id}")
         except Exception as e:
             message = f"Failed to connect to MLflow server {self.mlflow_tracking_uri}."
             raise RuntimeError(message) from e
@@ -106,9 +92,8 @@ class Training(FlowSpec):
             'learning_rate': 0.1, 
             'l2_leaf_reg': 1, 
             'depth': 4
-            }
+        }
         
-
         self.next(self.load_dataset)
     
 
@@ -242,25 +227,23 @@ class Training(FlowSpec):
             # Let's configure the autologging for the training process. Since we are
             # training the model corresponding to one of the folds, we won't log the
             # model itself.
-            mlflow.autolog(log_models=False)
+            mlflow.autolog(log_models=True)
 
             # Let's now build and fit the model on the training data. Notice how we are
             # using the training data we processed and stored as artifacts in the
             # `transform` step.
-            # self.saved_params_catboost = {'subsample': 0.8, 'learning_rate': 0.1, 'l2_leaf_reg': 1, 'depth': 4}
             self.model = CatBoostClassifier(**self.training_parameters)
-            # self.model.fit(X=X_train, y=y_train)
-
-
-            # self.model = build_model(self.x_train.shape[1])
             self.model.fit(
                 self.x_train,
                 self.y_train,
                 verbose=0,
             )
+
+            # Save the model
+            mlflow.catboost.log_model(self.model, "model")
+
         # After training a model for this fold, we want to evaluate it.
         self.next(self.evaluate_fold)
-        # self.next(self.end)
 
     @card
     @step
@@ -372,55 +355,72 @@ class Training(FlowSpec):
                 },
             )
 
+        # Find the best performing fold based on accuracy
+        best_fold = max(inputs, key=lambda x: x.accuracy)
+        
+        # Store only the specific attributes we need from the best fold
+        self.best_fold_metrics = {
+            'fold': best_fold.fold,
+            'accuracy': best_fold.accuracy,
+            'precision': best_fold.precision,
+            'recall': best_fold.recall,
+            'mlflow_fold_run_id': best_fold.mlflow_fold_run_id
+        }
+        
         # After we finish evaluating the cross-validation process, we can send the flow
         # to the registration step to register where we'll register the final version of
         # the model.
+        self.next(self.register_model)
+
+    @step
+    def register_model(self):
+        """Register the model in the Model Registry.
+        
+        This function will register the best model from cross-validation.
+        """
+        import mlflow
+        
+        logging.info(
+            "Best fold (fold %d) - accuracy: %.3f - precision: %.3f - recall: %.3f",
+            self.best_fold_metrics['fold'],
+            self.best_fold_metrics['accuracy'],
+            self.best_fold_metrics['precision'],
+            self.best_fold_metrics['recall']
+        )
+
+        # Set up MLflow tracking
+        mlflow.set_tracking_uri(self.mlflow_tracking_uri)
+        
+        # Log final metrics to the parent run
+        with mlflow.start_run(run_id=self.mlflow_run_id):
+            mlflow.log_metrics({
+                "mean_accuracy": self.mean_accuracy,
+                "mean_precision": self.mean_precision,
+                "mean_recall": self.mean_recall,
+                "best_fold_accuracy": self.best_fold_metrics['accuracy'],
+                "best_fold_precision": self.best_fold_metrics['precision'],
+                "best_fold_recall": self.best_fold_metrics['recall'],
+                "best_fold_number": self.best_fold_metrics['fold']
+            })
+            
+            # Register the best model
+            model_version = mlflow.register_model(
+                f"runs:/{self.best_fold_metrics['mlflow_fold_run_id']}/model",
+                "bank_churn_prediction"
+            )
+            
+            # Transition the model to 'Staging'
+            client = mlflow.tracking.MlflowClient()
+            client.transition_model_version_stage(
+                name="bank_churn_prediction",
+                version=model_version.version,
+                stage="Staging"
+            )
+            
+            logging.info(f"Registered model version {model_version.version} in Staging stage")
+        
+        # After registering the model, proceed to the end step
         self.next(self.end)
-
-    # @step
-    # def register_model(self):
-    #     """Register the model in the Model Registry.
-        
-    #     This function will aggregate results from all folds and register the best model.
-    #     """
-    #     import numpy as np
-    #     import mlflow
-        
-    #     # All metrics were already calculated in evaluate_model step
-    #     logging.info(
-    #         "Model evaluation complete. Final metrics:"
-    #     )
-    #     logging.info(
-    #         "Mean accuracy: %.3f (±%.3f)",
-    #         self.mean_accuracy,
-    #         self.accuracy_std
-    #     )
-
-    #     # Find best performing fold based on accuracy
-    #     # self.best_fold = max(inputs, key=lambda x: x.accuracy)
-
-    #     logging.info(
-    #         "Best fold (fold %d) - accuracy: %.3f - precision: %.3f - recall: %.3f",
-    #         self.best_fold.fold,
-    #         self.best_fold.accuracy,
-    #         self.best_fold.precision,
-    #         self.best_fold.recall
-    #     )
-
-    #     mlflow.set_tracking_uri(self.mlflow_tracking_uri)
-
-    #     with mlflow.start_run(run_id=self.mlflow_run_id):
-    #         mlflow.log_metrics({
-    #             "mean_accuracy": self.mean_accuracy,
-    #             "mean_precision": self.mean_precision,
-    #             "mean_recall": self.mean_recall,
-    #             "best_fold_accuracy": self.best_fold.accuracy,
-    #             "best_fold_precision": self.best_fold.precision,
-    #             "best_fold_recall": self.best_fold.recall
-    #         })
-        
-    #     # After logging metrics, proceed to the end step
-    #     self.next(self.end)
 
     @step
     def end(self):
