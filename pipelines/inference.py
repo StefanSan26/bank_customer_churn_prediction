@@ -80,10 +80,15 @@ class Inference(FlowSpec):
     @step
     def start(self):
         """Start and prepare the Inference pipeline."""
-        self.mlflow_tracking_uri = os.getenv("MLFLOW_TRACKING_URI", "http://127.0.0.1:5001")
+        # Log working directory
+        logging.info(f"Current working directory: {os.getcwd()}")
         
-        logging.info("MLFLOW_TRACKING_URI: %s", self.mlflow_tracking_uri)
-        mlflow.set_tracking_uri(self.mlflow_tracking_uri)
+        # Store values in instance variables that are meant to be modified
+        self._mlflow_tracking_uri = os.getenv("MLFLOW_TRACKING_URI", "http://127.0.0.1:5001")
+        self._model_run_id = self.model_run_id  # Store parameter value in instance variable
+        
+        logging.info("MLFLOW_TRACKING_URI: %s", self._mlflow_tracking_uri)
+        mlflow.set_tracking_uri(self._mlflow_tracking_uri)
         logging.info("Starting inference pipeline")
         
         # Set the experiment
@@ -93,7 +98,7 @@ class Inference(FlowSpec):
         if not os.path.exists(self.input_data_path):
             raise FileNotFoundError(f"Input data file not found: {self.input_data_path}")
         
-        if self.model_run_id is None:
+        if self._model_run_id is None:
             # If no specific run ID is provided, try to get the latest successful run
             logging.info("No model run ID provided, attempting to find the latest successful run")
             client = mlflow.tracking.MlflowClient()
@@ -109,8 +114,8 @@ class Inference(FlowSpec):
             )
             
             if runs:
-                self.model_run_id = runs[0].info.run_id
-                logging.info(f"Using latest successful run: {self.model_run_id}")
+                self._model_run_id = runs[0].info.run_id
+                logging.info(f"Using latest successful run: {self._model_run_id}")
             else:
                 raise ValueError("No successful runs found in the MLflow experiment")
         
@@ -118,18 +123,26 @@ class Inference(FlowSpec):
     
     @step
     def load_model(self):
-        """Load the trained model from MLflow."""
-        logging.info(f"Loading model from run ID: {self.model_run_id}")
+        """Load the trained model from MLflow Model Registry."""
+        logging.info("Loading model from Model Registry: models:/bank_churn_prediction/Staging")
         
         try:
-            mlflow.set_tracking_uri(self.mlflow_tracking_uri)
+            mlflow.set_tracking_uri(self._mlflow_tracking_uri)
             
-            # Load the model using MLflow's API
-            self.model = mlflow.catboost.load_model(f"runs:/{self.model_run_id}/model")
-            logging.info("Model loaded successfully")
+            # Load the model directly from the Model Registry
+            logging.info("Attempting to load model from Model Registry...")
+            self.model = mlflow.catboost.load_model("models:/bank_churn_prediction/Staging")
+            
+            # Log model feature names
+            feature_names = self.model.feature_names_
+            logging.info(f"Model feature names: {feature_names}")
+            
+            logging.info("Model loaded successfully from Model Registry")
                 
         except Exception as e:
             logging.error(f"Error loading model: {str(e)}")
+            logging.error(f"MLflow tracking URI: {self._mlflow_tracking_uri}")
+            logging.error(f"Current working directory: {os.getcwd()}")
             self.model = None
             raise
         
@@ -200,17 +213,31 @@ class Inference(FlowSpec):
             # Prepare features for prediction
             if self.has_labels:
                 self.X = self.data.drop(columns=['Exited'])
-                if 'CustomerId' in self.X.columns:
-                    self.X = self.X.drop(columns=['CustomerId'])
-                if 'id' in self.X.columns:
-                    self.X = self.X.drop(columns=['id'])
                 self.y_true = self.data['Exited']
             else:
                 self.X = self.data.copy()
-                if 'CustomerId' in self.X.columns:
-                    self.X = self.X.drop(columns=['CustomerId'])
-                if 'id' in self.X.columns:
-                    self.X = self.X.drop(columns=['id'])
+            
+            # Add 'id' column based on index if it doesn't exist
+            if 'id' not in self.X.columns:
+                self.X['id'] = self.X.index
+                
+            # Add or maintain CustomerId
+            if 'CustomerId' not in self.X.columns:
+                # If we don't have CustomerId, create one based on id or index
+                self.X['CustomerId'] = self.X.get('id', self.X.index).astype(str)
+            
+            # Define the expected column order to match the model's feature names exactly
+            expected_order = ['id', 'CustomerId', 'Surname', 'CreditScore', 'Geography', 'Gender', 
+                             'Age', 'Tenure', 'Balance', 'NumOfProducts', 'HasCrCard', 
+                             'IsActiveMember', 'EstimatedSalary']
+            
+            # Check if all expected columns exist in the dataframe
+            missing_cols = [col for col in expected_order if col not in self.X.columns]
+            if missing_cols:
+                raise ValueError(f"Missing expected columns: {missing_cols}")
+            
+            # Reorder columns to match the exact order expected by the model
+            self.X = self.X[expected_order]
             
             logging.info("Data preprocessing complete")
             
@@ -278,10 +305,10 @@ class Inference(FlowSpec):
             logging.info(f"Saved predictions to {self.output_data_path}")
             
             # Log the results to MLflow
-            mlflow.set_tracking_uri(self.mlflow_tracking_uri)
+            mlflow.set_tracking_uri(self._mlflow_tracking_uri)
             with mlflow.start_run(run_name=f"inference-{current.run_id}"):
                 # Log the model run ID used for inference
-                mlflow.log_param("model_run_id", self.model_run_id)
+                mlflow.log_param("model_run_id", self._model_run_id)
                 
                 # Log metrics if available
                 if self.has_labels:

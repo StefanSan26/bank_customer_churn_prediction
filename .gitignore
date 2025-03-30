@@ -1,20 +1,71 @@
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
 
+# Virtual Environment
+.env
+.venv
+env/
+venv/
+ENV/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb
+
+# MLflow
+mlruns/
+mlartifacts/
+mlflow.db
+mlflow.log
+
+# Model artifacts and training logs
+catboost_info/
+tmp_model/
+model_run_id.txt
+
+# Data
+data/
+*.csv
+*.tsv
+*.json
+
+# Metaflow
 .metaflow/
 metaflow_card_cache/
 metaflow.s3.**/
-mlruns/
-mlartifacts/
 
+# Ruff
+.ruff_cache/
+
+# OS
 .DS_Store
-.ipynb_checkpoints
-.env
-.venv
-.venv*
-*.pem
-.idx/aws.nix
+Thumbs.db
 
 penguins.db
 sample.json
