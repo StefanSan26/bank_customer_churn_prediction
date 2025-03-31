@@ -29,38 +29,38 @@ The project uses CatBoost, a gradient boosting algorithm, to predict customer ch
 
 ## Setup
 
-1. Install the required dependencies:
-
+1. Install `uv` (if not already installed):
 ```bash
-pip install -r requirements.txt
+curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-2. Set up MLflow tracking server with SQLite backend for persistence:
+2. Create and activate a virtual environment:
+```bash
+uv venv
+source .venv/bin/activate
+```
 
+3. Install the required dependencies:
+```bash
+uv pip install -r requirements.txt
+```
+
+4. Set up MLflow tracking server with SQLite backend for persistence:
 ```bash
 mlflow server --backend-store-uri sqlite:///mlflow.db --default-artifact-root ./mlruns --host 127.0.0.1 --port 5001
 ```
 
-3. Create the MLflow experiment:
-
+5. Create the MLflow experiment:
 ```bash
 mlflow experiments create -n "bank_churn_prediction"
 ```
 
-4. Set environment variables (or create a `.env` file):
-
+6. Set environment variables (or create a `.env` file):
 ```
 MLFLOW_TRACKING_URI=http://127.0.0.1:5001
 DATASET_DIR=data/
 ```
 
-## Data Preparation
-
-If you need to split your data into training and test sets:
-
-```bash
-python scripts/split_data.py
-```
 
 ## Training the Model
 
@@ -170,12 +170,4 @@ If you encounter issues with the Metaflow pipelines:
 2. Ensure that the data files exist in the expected locations
 3. Try running the direct scripts as an alternative
 
-## Next Steps
 
-Potential improvements to the project:
-
-1. Feature importance analysis to understand key churn factors
-2. Hyperparameter optimization to improve model performance
-3. Deployment of the model as a REST API
-4. Development of a dashboard for visualizing churn predictions
-5. Implementation of model monitoring for drift detection

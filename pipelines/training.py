@@ -37,13 +37,7 @@ PACKAGES = {
     "scikit-learn": "1.5.2",
     "setuptools": "75.1.0"
 }
-# def packages(*names: str):
-#     """Return a dictionary of the specified packages and their version.
 
-#     This function is useful to set up the different pipelines while keeping the
-#     package versions consistent and centralized in a single location.
-#     """
-#     return {name: PACKAGES[name] for name in names if name in PACKAGES}
 
 
 @project(name='bank_customer_churn_prediction')
@@ -103,7 +97,7 @@ class Training(FlowSpec):
         """
         import numpy as np
 
-        files = [os.path.join(self.dataset_dir, f) for f in os.listdir(self.dataset_dir) if f.endswith('.csv')]
+        files = [os.path.join(self.dataset_dir, f) for f in os.listdir(self.dataset_dir) if f.endswith('train.csv')]
 
         logging.info("Found %d file(s) in local directory", len(files))
         if not files:
@@ -112,8 +106,6 @@ class Training(FlowSpec):
         self.raw_data = [pd.read_csv(file) for file in files]
         self.data = pd.concat(self.raw_data, ignore_index=True)
 
-        # Replace extraneous values in the sex column with NaN. We can handle missing
-        # values later in the pipeline.
         self.data.dropna(inplace=True)
         self.data.reset_index(drop=True,inplace=True)
 
