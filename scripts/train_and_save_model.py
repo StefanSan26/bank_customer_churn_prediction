@@ -7,18 +7,24 @@ from catboost import CatBoostClassifier
 from sklearn.preprocessing import LabelEncoder
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, precision_score, recall_score
+import pickle  # Add this import at the top with other imports
+import logging
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
 
 # Set MLflow tracking URI
+logging.info("Setting up MLflow tracking...")
 mlflow.set_tracking_uri("http://127.0.0.1:5001")
 mlflow.set_experiment("bank_churn_prediction")
 
 # Load data
-print("Loading data...")
+logging.info("Loading data...")
 data = pd.read_csv('data/train.csv')
-print(f"Loaded {len(data)} samples")
+logging.info(f"Loaded {len(data)} samples")
 
 # Preprocess data
-print("Preprocessing data...")
+logging.info("Preprocessing data...")
 # Handle categorical variables
 label_enc_gender = LabelEncoder()
 label_enc_geography = LabelEncoder()
@@ -48,7 +54,7 @@ X["Surname"] = X["Surname"].apply(hash_surname)
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
 # Train model
-print("Training model...")
+logging.info("Training model...")
 with mlflow.start_run() as run:
     # Log parameters
     params = {
@@ -79,11 +85,18 @@ with mlflow.start_run() as run:
     # Log model
     mlflow.catboost.log_model(model, "model")
     
-    print(f"Model trained and saved with run_id: {run.info.run_id}")
-    print(f"Accuracy: {accuracy:.4f}")
-    print(f"Precision: {precision:.4f}")
-    print(f"Recall: {recall:.4f}")
+    # Save model as pkl file
+    model_path = "models/catboost_model.pkl"
+    os.makedirs(os.path.dirname(model_path), exist_ok=True)
+    with open(model_path, 'wb') as f:
+        pickle.dump(model, f)
+    logging.info(f"Model saved as pickle file at: {model_path}")
+    
+    logging.info(f"Model trained and saved with run_id: {run.info.run_id}")
+    logging.info(f"Accuracy: {accuracy:.4f}")
+    logging.info(f"Precision: {precision:.4f}")
+    logging.info(f"Recall: {recall:.4f}")
     
     # Save run ID to file for easy reference
     with open("model_run_id.txt", "w") as f:
-        f.write(run.info.run_id) 
+        f.write(run.info.run_id)

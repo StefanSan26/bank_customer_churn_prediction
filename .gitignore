@@ -44,11 +44,13 @@ mlruns/
 mlartifacts/
 mlflow.db
 mlflow.log
+model_run_id.txt
 
 # Model artifacts and training logs
 catboost_info/
 tmp_model/
 model_run_id.txt
+models/
 
 # Data
 data/
