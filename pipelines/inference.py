@@ -1,15 +1,16 @@
 import logging
 import os
+import sys
 from pathlib import Path
 import pandas as pd
 import numpy as np
-import hashlib
 import mlflow
-from catboost import CatBoostClassifier
-from sklearn.preprocessing import LabelEncoder
 from dotenv import load_dotenv
 
 load_dotenv()
+
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, ROOT)
 
 from metaflow import (
     FlowSpec,
@@ -150,101 +151,60 @@ class Inference(FlowSpec):
     
     @step
     def load_data(self):
-        """Load and prepare the input data for inference."""
-        logging.info(f"Loading data from: {self.input_data_path}")
-        
-        try:
-            self.data = pd.read_csv(self.input_data_path)
-            logging.info(f"Loaded {len(self.data)} samples for inference")
-            
-            # Check if the data has the expected columns
-            required_columns = ['CreditScore', 'Geography', 'Gender', 'Age', 'Tenure', 
-                               'Balance', 'NumOfProducts', 'HasCrCard', 'IsActiveMember', 
-                               'EstimatedSalary', 'Surname']
-            
-            missing_columns = [col for col in required_columns if col not in self.data.columns]
-            if missing_columns:
-                raise ValueError(f"Input data is missing required columns: {missing_columns}")
-            
-            # Store the original data for later reference
-            self.original_data = self.data.copy()
-            
-            # Check if 'Exited' column exists (for evaluation)
-            self.has_labels = 'Exited' in self.data.columns
-            
-        except Exception as e:
-            logging.error(f"Error loading data: {str(e)}")
-            raise
-        
+        """Load input data using src.data.load_data."""
+        from src.data.load_data import load_data as load_data_fn
+
+        logging.info("Loading data from: %s", self.input_data_path)
+        path = self.input_data_path if os.path.isabs(self.input_data_path) else os.path.join(ROOT, self.input_data_path)
+        self.data = load_data_fn(path)
+        logging.info("Loaded %d samples for inference", len(self.data))
+
+        required_columns = [
+            "CreditScore", "Geography", "Gender", "Age", "Tenure",
+            "Balance", "NumOfProducts", "HasCrCard", "IsActiveMember",
+            "EstimatedSalary", "Surname",
+        ]
+        missing_columns = [c for c in required_columns if c not in self.data.columns]
+        if missing_columns:
+            raise ValueError(f"Input data missing required columns: {missing_columns}")
+
+        self.original_data = self.data.copy()
+        self.has_labels = "Exited" in self.data.columns
         self.next(self.preprocess_data)
     
     @step
     def preprocess_data(self):
-        """Preprocess the input data for inference.
-        
-        This step applies the same preprocessing steps as used during training.
-        """
+        """Preprocess using src.data.preprocess_data and build feature matrix for model."""
+        from src.data.preprocess import preprocess_data
+        from src.features.build_features import build_features
+
         logging.info("Preprocessing data for inference")
-        
-        try:
-            # Handle categorical variables
-            label_enc_gender = LabelEncoder()
-            label_enc_geography = LabelEncoder()
-            
-            # Fit and transform categorical variables
-            # For Gender, we know the categories are typically 'Male' and 'Female'
-            self.data["Gender"] = label_enc_gender.fit_transform(self.data["Gender"])
-            
-            # For Geography, we need to handle potential new categories
-            # In a production system, you would load the encoder from the training pipeline
-            self.data["Geography"] = label_enc_geography.fit_transform(self.data["Geography"])
-            
-            # Define a function to hash surnames to a consistent integer value
-            def hash_surname(surname):
-                # Use md5 to get a consistent hash across platforms
-                hash_obj = hashlib.md5(str(surname).encode())
-                # Convert first 4 bytes of hash to integer and take modulo 1000 
-                # to limit to 0-999 range
-                return int(hash_obj.hexdigest()[:8], 16) % 1000
-            
-            # Use hash encoding for surnames to handle unseen values consistently
-            self.data["Surname"] = self.data["Surname"].apply(hash_surname)
-            
-            # Prepare features for prediction
-            if self.has_labels:
-                self.X = self.data.drop(columns=['Exited'])
-                self.y_true = self.data['Exited']
-            else:
-                self.X = self.data.copy()
-            
-            # Add 'id' column based on index if it doesn't exist
-            if 'id' not in self.X.columns:
-                self.X['id'] = self.X.index
-                
-            # Add or maintain CustomerId
-            if 'CustomerId' not in self.X.columns:
-                # If we don't have CustomerId, create one based on id or index
-                self.X['CustomerId'] = self.X.get('id', self.X.index).astype(str)
-            
-            # Define the expected column order to match the model's feature names exactly
-            expected_order = ['id', 'CustomerId', 'Surname', 'CreditScore', 'Geography', 'Gender', 
-                             'Age', 'Tenure', 'Balance', 'NumOfProducts', 'HasCrCard', 
-                             'IsActiveMember', 'EstimatedSalary']
-            
-            # Check if all expected columns exist in the dataframe
-            missing_cols = [col for col in expected_order if col not in self.X.columns]
-            if missing_cols:
-                raise ValueError(f"Missing expected columns: {missing_cols}")
-            
-            # Reorder columns to match the exact order expected by the model
-            self.X = self.X[expected_order]
-            
-            logging.info("Data preprocessing complete")
-            
-        except Exception as e:
-            logging.error(f"Error preprocessing data: {str(e)}")
-            raise
-        
+        self.data = preprocess_data(self.data)
+
+        if self.has_labels:
+            self.X, self.y_true = build_features(self.data)
+        else:
+            self.X, _ = build_features(self.data)
+            self.y_true = None
+
+        if self.X is None:
+            raise ValueError("Could not build feature matrix")
+
+        # Align columns to model order (add id/CustomerId if missing)
+        if "id" not in self.X.columns:
+            self.X["id"] = self.X.index
+        if "CustomerId" not in self.X.columns:
+            self.X["CustomerId"] = self.X.get("id", self.X.index).astype(str)
+        expected_order = [
+            "id", "CustomerId", "Surname", "CreditScore", "Geography", "Gender",
+            "Age", "Tenure", "Balance", "NumOfProducts", "HasCrCard",
+            "IsActiveMember", "EstimatedSalary",
+        ]
+        missing_cols = [c for c in expected_order if c not in self.X.columns]
+        if missing_cols:
+            raise ValueError(f"Missing expected columns: {missing_cols}")
+        self.X = self.X[expected_order]
+        logging.info("Data preprocessing complete")
         self.next(self.make_predictions)
     
     @card

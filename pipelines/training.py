@@ -1,13 +1,16 @@
 import logging
 import os
+import sys
 from pathlib import Path
 import pandas as pd
-from catboost import CatBoostClassifier
 import mlflow
 from dotenv import load_dotenv
 
-
 load_dotenv()
+
+# Project root for src imports
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, ROOT)
 
 from metaflow import (
     FlowSpec,
@@ -93,23 +96,24 @@ class Training(FlowSpec):
 
     @step
     def load_dataset(self):
-        """Load and prepare the dataset.
-        """
+        """Load and prepare the dataset using src.data."""
         import numpy as np
+        from src.data.load_data import load_data
+        from src.data.preprocess import preprocess_data
 
-        files = [os.path.join(self.dataset_dir, f) for f in os.listdir(self.dataset_dir) if f.endswith('train.csv')]
+        dataset_dir_abs = os.path.join(ROOT, self.dataset_dir) if not os.path.isabs(self.dataset_dir) else self.dataset_dir
+        if not os.path.isdir(dataset_dir_abs):
+            dataset_dir_abs = ROOT
+        files = [os.path.join(dataset_dir_abs, f) for f in os.listdir(dataset_dir_abs) if f.endswith("train.csv")]
 
         logging.info("Found %d file(s) in local directory", len(files))
         if not files:
             raise ValueError("No dataset files found in local directory")
 
-        self.raw_data = [pd.read_csv(file) for file in files]
-        self.data = pd.concat(self.raw_data, ignore_index=True)
+        self.raw_data = [load_data(f) for f in files]
+        combined = pd.concat(self.raw_data, ignore_index=True)
+        self.data = preprocess_data(combined)
 
-        self.data.dropna(inplace=True)
-        self.data.reset_index(drop=True,inplace=True)
-
-        # We want to shuffle the dataset. We can use the current time as the seed to ensure a # different shuffle each time the pipeline is executed.
         seed = 42
         generator = np.random.default_rng(seed=seed)
         self.data = self.data.sample(frac=1, random_state=generator)
@@ -139,71 +143,29 @@ class Training(FlowSpec):
 
     @step
     def transform_fold(self):
-        """Transform the data to build a model during the cross-validation process.
+        """Split data for this fold; preprocessing already done in load_dataset via src.data."""
+        from src.features.build_features import build_features
 
-        This step will run for each fold in the cross-validation process. It uses
-        a SciKit-Learn pipeline to preprocess the dataset before training a model.
-        """
-        from sklearn.preprocessing import LabelEncoder
-        import hashlib
-
-        # Let's start by unpacking the indices representing the training and test data
-        # for the current fold. 
         self.fold, (self.train_indices, self.test_indices) = self.input
         logging.info("Transforming fold %d...", self.fold)
 
-
-        # Finally, let's build the SciKit-Learn pipeline to process the feature columns,
-        # fit it to the training data and transform both the training and test data.
-        self.x_train = self.data.iloc[self.train_indices].drop(columns=['Exited'])
-        self.x_test = self.data.iloc[self.test_indices].drop(columns=['Exited'])
-        self.y_train = self.data.iloc[self.train_indices].Exited
-        self.y_test = self.data.iloc[self.test_indices].Exited
-
-        # Fit the label encoder on the training data only
-        label_enc_gender = LabelEncoder()
-        label_enc_geography = LabelEncoder()
-
-
-        # Handle categorical variables
-        # Use label encoding for gender and geography which have limited categories
-        self.x_train["Gender"] = label_enc_gender.fit_transform(self.x_train["Gender"])
-        self.x_test["Gender"] = label_enc_gender.transform(self.x_test["Gender"])
-        self.x_train["Geography"] = label_enc_geography.fit_transform(self.x_train["Geography"])
-        self.x_test["Geography"] = label_enc_geography.transform(self.x_test["Geography"])
-
-        # Define a function to hash surnames to a consistent integer value
-        def hash_surname(surname):
-            # Use md5 to get a consistent hash across platforms
-            hash_obj = hashlib.md5(str(surname).encode())
-            # Convert first 4 bytes of hash to integer and take modulo 1000 
-            # to limit to 0-999 range
-            return int(hash_obj.hexdigest()[:8], 16) % 1000
-
-        # Use hash encoding for surnames to handle unseen values consistently
-        self.x_train["Surname"] = self.x_train["Surname"].apply(hash_surname)
-        self.x_test["Surname"] = self.x_test["Surname"].apply(hash_surname)
-
-
-        # After processing the data and storing it as artifacts in the flow, we want
-        # to train a model.
+        train_df = self.data.iloc[self.train_indices]
+        test_df = self.data.iloc[self.test_indices]
+        self.x_train, self.y_train = build_features(train_df)
+        self.x_test, self.y_test = build_features(test_df)
+        if self.y_train is None or self.y_test is None:
+            raise ValueError("Exited column missing")
         self.next(self.train_fold)
 
     @card
     @step
     def train_fold(self):
-        """Train a model as part of the cross-validation process.
-
-        This step will run for each fold in the cross-validation process. It trains the
-        model using the data we processed in the previous step.
-        """
+        """Train a model for this fold using src.models.train."""
         import mlflow
+        from src.models.train import train_model
 
         logging.info("Training fold %d...", self.fold)
 
-        # Let's track the training process under the same experiment we started at the
-        # beginning of the flow. Since we are running cross-validation, we can create
-        # a nested run for each fold to keep track of each separate model individually.
         mlflow.set_tracking_uri(self.mlflow_tracking_uri)
         with (
             mlflow.start_run(run_id=self.mlflow_run_id),
@@ -212,87 +174,43 @@ class Training(FlowSpec):
                 nested=True,
             ) as run,
         ):
-            # Let's store the identifier of the nested run in an artifact so we can
-            # reuse it later when we evaluate the model from this fold.
             self.mlflow_fold_run_id = run.info.run_id
-
-            # Let's configure the autologging for the training process. Since we are
-            # training the model corresponding to one of the folds, we won't log the
-            # model itself.
             mlflow.autolog(log_models=True)
-
-            # Let's now build and fit the model on the training data. Notice how we are
-            # using the training data we processed and stored as artifacts in the
-            # `transform` step.
-            self.model = CatBoostClassifier(**self.training_parameters)
-            self.model.fit(
+            self.model = train_model(
                 self.x_train,
                 self.y_train,
+                params=self.training_parameters,
+                log_to_mlflow=True,
                 verbose=0,
             )
-
-            # Save the model
             mlflow.catboost.log_model(self.model, "model")
 
-        # After training a model for this fold, we want to evaluate it.
         self.next(self.evaluate_fold)
 
     @card
     @step
     def evaluate_fold(self):
-        """Evaluate the model we created as part of the cross-validation process.
-
-        This step will run for each fold in the cross-validation process. It evaluates
-        the model using the test data for this fold.
-        """
+        """Evaluate the model for this fold using src.models.evaluate."""
         import mlflow
-        from sklearn.metrics import precision_score, recall_score, accuracy_score
-        import numpy as np
+        from src.models.evaluate import evaluate_model
 
         logging.info("Evaluating fold %d...", self.fold)
 
-        # Let's evaluate the model using the test data we processed and stored as
-        # artifacts during the `transform` step.
-        # self.loss, self.accuracy = self.model.evaluate(
-        #     self.x_test,
-        #     self.y_test,
-        #     verbose=2,
-        # )
-        # Assuming you have your test data (X_test, y_test)
+        metrics = evaluate_model(self.model, self.x_test, self.y_test, log_to_mlflow=False)
+        self.accuracy = metrics["accuracy"]
+        self.precision = metrics["precision"]
+        self.recall = metrics["recall"]
         self.y_pred = self.model.predict(self.x_test)
-        
-        # Calculate accuracy
-        self.accuracy = accuracy_score(self.y_test, self.y_pred)
-        # Calculate macro-averaged  precision and recall
-        self.precision = precision_score(self.y_test, self.y_pred, average="macro")
-        self.recall = recall_score(self.y_test, self.y_pred, average="macro")
-        #calculate auc
-        # self.auc = roc_auc_score(self.y_test, self.y_pred)
-
 
         logging.info(
             "Fold %d - accuracy: %f - precision: %f - recall: %f",
-            self.accuracy, 
-            self.fold,
-            self.precision,
-            self.recall
+            self.fold, self.accuracy, self.precision, self.recall,
         )
 
-        # Let's log everything under the same nested run we created when training the
-        # current fold's model.
         mlflow.set_tracking_uri(self.mlflow_tracking_uri)
         with mlflow.start_run(run_id=self.mlflow_fold_run_id):
-            mlflow.log_metrics(
-                {
-                    "accuracy": self.accuracy,
-                    "precision": self.precision,
-                    "recall": self.recall,         
-                },
-            )
+            mlflow.log_metrics({"accuracy": self.accuracy, "precision": self.precision, "recall": self.recall})
 
-        # When we finish evaluating every fold in the cross-validation process, we want
-        # to evaluate the overall performance of the model by averaging the scores from
-        # each fold.
         self.next(self.evaluate_model)
 
     @card

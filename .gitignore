@@ -37,7 +37,7 @@ ENV/
 
 # Jupyter Notebook
 .ipynb_checkpoints
-*.ipynb
+experimenting.ipynb
 
 # MLflow
 mlruns/
@@ -54,9 +54,14 @@ models/
 
 # Data
 data/
+data/raw/
+data/processed/
 *.csv
 *.tsv
 *.json
+# Optional: keep bundled serving model (Telco-style)
+!src/serving/model/
+!src/serving/model/**
 
 # Metaflow
 .metaflow/

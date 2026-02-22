@@ -1,26 +1,14 @@
-azure-ai-ml==1.19.0
-azureml-mlflow==1.57.0.post1
-boto3==1.35.32
-catboost==1.2.7
-evidently==0.4.33
-jax[cpu]==0.4.24
-keras==2.15.0
-metaflow==2.13.0
-mlflow==2.17.1
-numpy==1.26.4
-packaging==24.1
-pandas==2.2.3
-pyarrow==14.0.1
-pylint==3.0.3
-pytest==7.4.3
-python-dotenv==1.0.1
-requests==2.32.3
-scikit-learn==1.5.2
-setuptools==75.1.0
-
-# Optional extras
-mlflow[extras]
-mlserver
-mlserver-mlflow
-
-awscurl
+# Bank customer churn prediction - core deps
+# Install: pip install -r requirements.txt
+catboost>=1.2
+mlflow>=2.17
+pandas>=2.0
+scikit-learn>=1.5
+python-dotenv>=1.0
+# API (optional for scripts-only)
+fastapi>=0.115
+uvicorn>=0.30
+pydantic>=2.0
+# Tests / scripts
+requests>=2.32
+ruff>=0.8

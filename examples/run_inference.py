@@ -1,7 +1,8 @@
 #!/usr/bin/env python
 """
-Example script to demonstrate how to use the inference pipeline.
-This script runs the inference pipeline on a sample dataset.
+Example: run the Metaflow inference pipeline on a sample dataset.
+For programmatic prediction use src.serving.inference.predict().
+For REST API use: uvicorn src.app.main:app (then POST /predict).
 """
 
 import os
