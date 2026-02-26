@@ -2,9 +2,14 @@
 # Install: pip install -r requirements.txt
 catboost>=1.2
 mlflow>=2.17
+optuna>=3.6
 pandas>=2.0
 scikit-learn>=1.5
 python-dotenv>=1.0
+seaborn>=0.13
+xgboost>=2.0
+lightgbm>=3.5
+ipykernel>=6.26
 # API (optional for scripts-only)
 fastapi>=0.115
 uvicorn>=0.30

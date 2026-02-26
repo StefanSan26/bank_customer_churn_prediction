@@ -24,6 +24,10 @@ def preprocess_data(df: pd.DataFrame) -> pd.DataFrame:
     label_enc_gender = LabelEncoder()
     label_enc_geography = LabelEncoder()
     data = data.copy()
+    # Binary flags: ensure int (0/1) not float
+    for col in ("HasCrCard", "IsActiveMember"):
+        if col in data.columns:
+            data[col] = data[col].astype(int)
     data["Gender"] = label_enc_gender.fit_transform(data["Gender"])
     data["Geography"] = label_enc_geography.fit_transform(data["Geography"])
     data["Surname"] = data["Surname"].apply(_hash_surname)

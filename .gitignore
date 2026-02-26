@@ -38,6 +38,7 @@ ENV/
 # Jupyter Notebook
 .ipynb_checkpoints
 experimenting.ipynb
+notebooks/catboost_info/
 
 # MLflow
 mlruns/
