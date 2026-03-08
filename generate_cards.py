@@ -11,7 +11,7 @@ def generate_cards_for_run(run_id):
     """Generate cards for all steps in a Training run"""
     
     # Steps that have @card decorator in the Training flow
-    card_steps = ['start', 'cross_validation', 'train_fold', 'evaluate_fold']
+    card_steps = ['start', 'cross_validation', 'train_fold', 'evaluate_fold', 'evaluate_model', 'register_model']
     
     for step in card_steps:
         try:
