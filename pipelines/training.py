@@ -99,8 +99,8 @@ class Training(FlowSpec):
     )
     model_type = Parameter(
         "model_type",
-        help="Model algorithm to train: 'catboost' or 'xgboost'",
-        default="catboost",
+        help="Model algorithm to train: 'xgboost' or 'catboost'",
+        default="xgboost",
     )
     logging.basicConfig(level=logging.INFO)
     
@@ -145,9 +145,7 @@ class Training(FlowSpec):
             )
         self._model_type = self.model_type
 
-        if self._model_type == "xgboost":
-            self.training_parameters = {"random_state": int(self.seed)}
-        else:
+        if self._model_type == "catboost":
             self.training_parameters = {
                 "subsample": float(self.subsample),
                 "learning_rate": float(self.learning_rate),
@@ -155,6 +153,8 @@ class Training(FlowSpec):
                 "depth": int(self.depth),
                 "random_seed": int(self.seed),
             }
+        else:
+            self.training_parameters = {"random_state": int(self.seed)}
         
         mlflow.log_params({
             "model_type": self._model_type,
@@ -266,9 +266,9 @@ class Training(FlowSpec):
         ):
             self.mlflow_fold_run_id = run.info.run_id
 
-            if self._model_type == "xgboost":
-                from src.models.train_xgb import train_xgb_model
-                self.model = train_xgb_model(
+            if self._model_type == "catboost":
+                from src.models.train import train_model
+                self.model = train_model(
                     self.x_train,
                     self.y_train,
                     X_val=self.x_test,
@@ -278,8 +278,8 @@ class Training(FlowSpec):
                     verbose=0,
                 )
             else:
-                from src.models.train import train_model
-                self.model = train_model(
+                from src.models.train_xgb import train_xgb_model
+                self.model = train_xgb_model(
                     self.x_train,
                     self.y_train,
                     X_val=self.x_test,
@@ -506,7 +506,9 @@ class Training(FlowSpec):
     def register_model(self):
         """Register the model in the Model Registry.
         
-        This function will register the best model from cross-validation.
+        This function will register the best model from cross-validation
+        and assign the 'challenger' alias. Use scripts/promote_model.py
+        to promote a version to 'champion' for production use.
         """
         from metaflow.cards import Markdown
         
@@ -522,40 +524,37 @@ class Training(FlowSpec):
         mlflow.set_tracking_uri(self._mlflow_tracking_uri)
 
         with mlflow.start_run(run_id=self.mlflow_run_id):
+            # Step 1: register the model artifact using the low-level client API.
+            # mlflow.register_model() (fluent API) in MLflow 2.17+ internally calls
+            # search_logged_models (/api/2.0/mlflow/logged-models/search) which older
+            # MLflow servers don't support. create_model_version() bypasses that call.
+            model_version = None
+            client = mlflow.tracking.MlflowClient()
+            fold_run_id = self.best_fold_metrics['mlflow_fold_run_id']
             try:
-                # Register the best model
-                model_version = mlflow.register_model(
-                    f"runs:/{self.best_fold_metrics['mlflow_fold_run_id']}/model",
-                    "bank_churn_prediction",
-                )
-                
-                # Transition the model to 'Staging'
-                client = mlflow.tracking.MlflowClient()
-                client.transition_model_version_stage(
+                # Ensure the registered model exists before creating a version.
+                try:
+                    client.create_registered_model("bank_churn_prediction")
+                    logging.info("Created registered model 'bank_churn_prediction'")
+                except mlflow.exceptions.MlflowException:
+                    pass  # already exists
+
+                fold_run = client.get_run(fold_run_id)
+                model_source = f"{fold_run.info.artifact_uri}/model"
+
+                model_version = client.create_model_version(
                     name="bank_churn_prediction",
-                    version=model_version.version,
-                    stage="Staging",
+                    source=model_source,
+                    run_id=fold_run_id,
                 )
-                
                 logging.info(
-                    "Registered model version %s in Staging stage",
+                    "Registered model as bank_churn_prediction version %s",
                     model_version.version,
                 )
-
-                current.card.append(
-                    Markdown(
-                        f"# Model Registration\n\n"
-                        f"**Best model:** Fold {self.best_fold_metrics['fold']} "
-                        f"(recall {self.best_fold_metrics['recall']:.4f})\n\n"
-                        f"**Registered as:** bank_churn_prediction version {model_version.version} (Staging)"
-                    )
-                )
             except Exception as e:  # noqa: BLE001
-                logging.warning(
-                    "Failed to register model in MLflow Model Registry: %s",
-                    e,
+                logging.exception(
+                    "Failed to register model in MLflow Model Registry: %s", e,
                 )
-
                 current.card.append(
                     Markdown(
                         "# Model Registration\n\n"
@@ -564,6 +563,31 @@ class Training(FlowSpec):
                         "**Registration:** Skipped – MLflow Model Registry "
                         "not available or incompatible on current tracking "
                         "server.\n"
+                    )
+                )
+
+            # Step 2: assign the 'challenger' alias. This is a hard requirement —
+            # raise so the run fails visibly rather than silently producing a
+            # version with no alias.
+            if model_version is not None:
+                client.set_registered_model_alias(
+                    name="bank_churn_prediction",
+                    alias="challenger",
+                    version=model_version.version,
+                )
+                logging.info(
+                    "Assigned alias 'challenger' to bank_churn_prediction version %s",
+                    model_version.version,
+                )
+                current.card.append(
+                    Markdown(
+                        f"# Model Registration\n\n"
+                        f"**Best model:** Fold {self.best_fold_metrics['fold']} "
+                        f"(recall {self.best_fold_metrics['recall']:.4f})\n\n"
+                        f"**Registered as:** bank_churn_prediction version "
+                        f"{model_version.version} (alias: challenger)\n\n"
+                        f"Run `python scripts/promote_model.py --version "
+                        f"{model_version.version}` to promote to champion."
                     )
                 )
         

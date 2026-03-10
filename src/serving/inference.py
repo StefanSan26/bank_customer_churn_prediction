@@ -13,21 +13,50 @@ except ImportError:
     MLFLOW_AVAILABLE = False
 
 
-def load_model(model_uri: Optional[str] = None):
+def _load_model_by_flavor(uri: str):
     """
-    Load CatBoost model from MLflow (Model Registry or run URI) or from local path.
+    Load an MLflow model using the correct flavor-specific loader.
+
+    Inspects the MLmodel file to detect the saved flavor (xgboost or catboost)
+    and delegates to the matching loader so native methods like predict_proba
+    and feature_names_ are available. Falls back to pyfunc for unknown flavors.
 
     Args:
-        model_uri: e.g. "models:/bank_churn_prediction/Staging" or "runs:/<run_id>/model".
-                   If None, uses MLflow registry "models:/bank_churn_prediction/Staging".
+        uri: MLflow model URI, e.g. "models:/bank_churn_prediction@champion"
+             or "runs:/<run_id>/model".
 
     Returns:
-        Loaded model (e.g. CatBoostClassifier).
+        Loaded native model (XGBClassifier, CatBoostClassifier, or pyfunc wrapper).
+    """
+    local_path = mlflow.artifacts.download_artifacts(uri)
+    flavors = mlflow.models.Model.load(local_path).flavors
+
+    if "catboost" in flavors:
+        logging.info("Detected flavor: catboost")
+        return mlflow.catboost.load_model(uri)
+    if "xgboost" in flavors:
+        logging.info("Detected flavor: xgboost")
+        return mlflow.xgboost.load_model(uri)
+
+    logging.warning("Unknown flavor %s — falling back to pyfunc", list(flavors))
+    return mlflow.pyfunc.load_model(uri)
+
+
+def load_model(model_uri: Optional[str] = None):
+    """
+    Load a model from MLflow (Model Registry or run URI) using the correct flavor.
+
+    Args:
+        model_uri: e.g. "models:/bank_churn_prediction@champion" or "runs:/<run_id>/model".
+                   If None, uses MLflow registry "models:/bank_churn_prediction@champion".
+
+    Returns:
+        Loaded native model (XGBClassifier or CatBoostClassifier).
     """
     if not MLFLOW_AVAILABLE:
         raise RuntimeError("mlflow is required for load_model")
-    uri = model_uri or "models:/bank_churn_prediction/Staging"
-    return mlflow.catboost.load_model(uri)
+    uri = model_uri or "models:/bank_churn_prediction@champion"
+    return _load_model_by_flavor(uri)
 
 
 def predict(

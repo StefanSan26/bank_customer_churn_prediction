@@ -124,18 +124,18 @@ class Inference(FlowSpec):
     
     @step
     def load_model(self):
-        """Load the trained model from MLflow Model Registry."""
-        logging.info("Loading model from Model Registry: models:/bank_churn_prediction/Staging")
+        """Load the trained model from MLflow Model Registry using the 'champion' alias."""
+        logging.info("Loading model from Model Registry: models:/bank_churn_prediction@champion")
         
         try:
             mlflow.set_tracking_uri(self._mlflow_tracking_uri)
             
-            # Load the model directly from the Model Registry
             logging.info("Attempting to load model from Model Registry...")
-            self.model = mlflow.catboost.load_model("models:/bank_churn_prediction/Staging")
+            from src.serving.inference import _load_model_by_flavor
+            self.model = _load_model_by_flavor("models:/bank_churn_prediction@champion")
             
-            # Log model feature names
-            feature_names = self.model.feature_names_
+            # Log model feature names (available on both XGBClassifier and CatBoostClassifier)
+            feature_names = getattr(self.model, "feature_names_", None) or getattr(self.model, "feature_names_in_", None)
             logging.info(f"Model feature names: {feature_names}")
             
             logging.info("Model loaded successfully from Model Registry")
@@ -190,21 +190,7 @@ class Inference(FlowSpec):
         if self.X is None:
             raise ValueError("Could not build feature matrix")
 
-        # Align columns to model order (add id/CustomerId if missing)
-        if "id" not in self.X.columns:
-            self.X["id"] = self.X.index
-        if "CustomerId" not in self.X.columns:
-            self.X["CustomerId"] = self.X.get("id", self.X.index).astype(str)
-        expected_order = [
-            "id", "CustomerId", "Surname", "CreditScore", "Geography", "Gender",
-            "Age", "Tenure", "Balance", "NumOfProducts", "HasCrCard",
-            "IsActiveMember", "EstimatedSalary",
-        ]
-        missing_cols = [c for c in expected_order if c not in self.X.columns]
-        if missing_cols:
-            raise ValueError(f"Missing expected columns: {missing_cols}")
-        self.X = self.X[expected_order]
-        logging.info("Data preprocessing complete")
+        logging.info("Data preprocessing complete — features: %s", list(self.X.columns))
         self.next(self.make_predictions)
     
     @card

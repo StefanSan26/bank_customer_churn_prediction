@@ -68,12 +68,14 @@ def train_model(
             _log_loss_curve(evals_result)
 
         try:
+            import tempfile
             signature = infer_signature(X_train, model.predict(X_train))
-            mlflow.catboost.log_model(
-                model,
-                "model",
-                signature=signature,
-            )
+            # Use save_model + log_artifacts instead of log_model to avoid the
+            # /api/2.0/mlflow/logged-models endpoint introduced in MLflow 2.17+
+            # which older MLflow servers do not support.
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                mlflow.catboost.save_model(model, tmp_dir, signature=signature)
+                mlflow.log_artifacts(tmp_dir, artifact_path="model")
         except Exception as e:  # noqa: BLE001
             logging.warning("Failed to log CatBoost model to MLflow: %s", e)
 

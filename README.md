@@ -132,10 +132,10 @@ The model uses the following features to predict customer churn:
 
 The model achieves the following performance metrics on the test dataset:
 
-- **Accuracy**: ~86.85%
-- **Precision**: ~82.21%
-- **Recall**: ~75.45%
-- **AUC**: ~89.25%
+- **Accuracy**: ~81.39%
+- **Precision**: ~73.92%
+- **Recall**: ~80.95%
+- **AUC**: ~89.49%
 
 These metrics indicate that the model is effective at identifying customers who are likely to churn.
 

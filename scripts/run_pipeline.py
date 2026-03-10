@@ -29,7 +29,7 @@ def main(args):
     mlflow.set_experiment(args.experiment)
 
     with mlflow.start_run():
-        mlflow.log_param("model", "catboost")
+        mlflow.log_param("model", args.model_type)
         mlflow.log_param("test_size", args.test_size)
 
         # Load
@@ -66,8 +66,16 @@ def main(args):
         print(f"Train: {X_train.shape[0]} | Test: {X_test.shape[0]}")
 
         # Train
-        print("Training model...")
-        model = train_model(X_train, y_train, log_to_mlflow=True, verbose=0)
+        print(f"Training model ({args.model_type})...")
+        if args.model_type == "catboost":
+            model = train_model(X_train, y_train, log_to_mlflow=True, verbose=0)
+        else:
+            from src.models.train_xgb import train_xgb_model
+            model = train_xgb_model(
+                X_train, y_train,
+                X_val=X_test, y_val=y_test,
+                log_to_mlflow=True, verbose=0,
+            )
 
         # Evaluate
         print("Evaluating...")
@@ -82,5 +90,10 @@ if __name__ == "__main__":
     p.add_argument("--test_size", type=float, default=0.2)
     p.add_argument("--experiment", type=str, default="bank_churn_prediction")
     p.add_argument("--mlflow_uri", type=str, default=None)
+    p.add_argument(
+        "--model_type", type=str, default="xgboost",
+        choices=["catboost", "xgboost"],
+        help="Model algorithm: 'catboost' or 'xgboost' (default: xgboost)",
+    )
     args = p.parse_args()
     main(args)
